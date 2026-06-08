@@ -453,7 +453,8 @@
         if (decoded?.serviceId) {
           return {
             serviceId: decoded.serviceId,
-            pageType: decoded.pageType 
+            pageType: decoded.pageType,
+            businessId: decoded.businessId
           };
         }
       } catch (e) {
@@ -463,7 +464,8 @@
       // fallback → plain id
       return {
         serviceId: candidate,
-        pageType: null
+        pageType: null,
+        businessId: null
       };
 
       } catch (err) {
@@ -486,9 +488,12 @@
         return res.json();
       },
 
-      async fetchTokens(verifierConfigId, appId) {
+      async fetchTokens(verifierConfigId, appId, businessId) {
+        const query = new URLSearchParams({ appId });
+        if (businessId) query.set('businessId', businessId);
+
         const res = await fetch(
-          `${ENTITY_DASHBOARD_BASE_URL}/api/v1/app/verifier/${verifierConfigId}/tokens?appId=${appId}`,
+          `${ENTITY_DASHBOARD_BASE_URL}/api/v1/app/verifier/${verifierConfigId}/tokens?${query.toString()}`,
           { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' } }
         );
         if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
@@ -565,6 +570,7 @@
         const verifierData      = getVerifierData(window.location.href);
         const verifierId        = ref(verifierData?.serviceId || null);
         const urlPageType       = verifierData?.pageType || null;
+        const urlBusinessId     = verifierData?.businessId || null;
         const serviceName       = ref('Hypersign KYC');
         const pageTitle         = ref('Verify Your Identity');
         const pageSubtitle      = ref('Please read the Terms & Conditions before proceeding');
@@ -641,7 +647,7 @@
             const configData = await ApiService.loadVerifierConfig(id, urlPageType);
             const { serviceId: appId, _id: verifierConfigId } = configData;
             if (!appId) throw new Error('appId not found in config response');
-            const tokenData = await ApiService.fetchTokens(verifierConfigId, appId);
+            const tokenData = await ApiService.fetchTokens(verifierConfigId, appId, urlBusinessId);
             applyConfigToState(configData, tokenData);
             setSandboxBanner(configData.developmentStage);
             return true;
