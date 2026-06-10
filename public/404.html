@@ -79,6 +79,10 @@
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     }
 
+    [v-cloak] {
+      display: none;
+    }
+
     /* Theme-aware card background */
     .theme-card {
       background-color: var(--theme-surface);
@@ -209,7 +213,7 @@
   </style>
 </head>
 <body data-theme="light">
-  <div id="app" class="min-h-screen flex flex-col justify-center items-center pt-12">
+  <div id="app" v-cloak class="min-h-screen flex flex-col justify-center items-center pt-12">
 
     <!-- Sandbox Warning Banner -->
     <div v-if="sandboxVisible" class="fixed top-0 left-0 right-0 bg-yellow-100 border-b border-yellow-200 px-4 py-3 z-50">
@@ -224,8 +228,14 @@
       </div>
     </div>
 
+    <section v-if="verifierId && isLoading && !configLoaded && !configError"
+      class="theme-card flex flex-col items-center p-8 rounded-2xl shadow-lg max-w-md w-full">
+      <span class="spinner"></span>
+    </section>
+
     <!-- Central Section with Horizontal Steps -->
-    <section class="theme-card flex flex-col items-center p-8 rounded-2xl shadow-lg max-w-md w-full space-y-4">
+    <section v-if="!verifierId || configLoaded || configError || !isLoading"
+      class="theme-card flex flex-col items-center p-8 rounded-2xl shadow-lg max-w-md w-full space-y-4">
 
       <!-- Header: logo on left, titles stacked on right -->
       <header class="flex items-center space-x-4 mb-2 w-full">
@@ -254,11 +264,6 @@
             <span class="theme-subtitle text-sm">{{ step.subtitle }}</span>
           </div>
         </div>
-      </div>
-
-      <!-- Call to Action -->
-      <div v-if="verifierId && isLoading && !configLoaded && !configError" class="mt-2 flex items-center justify-center py-2">
-        <span class="spinner"></span>
       </div>
 
       <button v-if="configLoaded && !isVerified && !errorMessage" @click="handleStartClick"
@@ -364,8 +369,10 @@
 
     const ENTITY_DASHBOARD_BASE_URL =
       window.HYPERSIGN_DASHBOARD_SERVICE_BASE_URL || 'https://api.entity.dashboard.hypersign.id';
+    const ID_SERVICE_BASE_URL =window.ID_SERVICE_BASE_URL || 'https://api.cavach.hypersign.id';
 
     const KYC_SESSION_PATH = '/api/v1/e-kyc/verification/session';
+    const KYB_COMPANY_PATH = '/api/v1/e-kyb/verification/company';
 
     const FLOW_CONFIG = {
       kyc: {
@@ -453,7 +460,8 @@
         if (decoded?.serviceId) {
           return {
             serviceId: decoded.serviceId,
-            pageType: decoded.pageType 
+            pageType: decoded.pageType,
+            businessId: decoded.businessId
           };
         }
       } catch (e) {
@@ -463,7 +471,8 @@
       // fallback → plain id
       return {
         serviceId: candidate,
-        pageType: null
+        pageType: null,
+        businessId: null
       };
 
       } catch (err) {
@@ -486,13 +495,30 @@
         return res.json();
       },
 
-      async fetchTokens(verifierConfigId, appId) {
+      async fetchTokens(verifierConfigId, appId, businessId) {
+        const query = new URLSearchParams({ appId });
+        if (businessId) query.set('businessId', businessId);
+
         const res = await fetch(
-          `${ENTITY_DASHBOARD_BASE_URL}/api/v1/app/verifier/${verifierConfigId}/tokens?appId=${appId}`,
+          `${ENTITY_DASHBOARD_BASE_URL}/api/v1/app/verifier/${verifierConfigId}/tokens?${query.toString()}`,
           { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' } }
         );
         if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
         return res.json();
+      },
+      async fetchBusinessCompany(businessId, accessToken) {
+        if (!businessId || !accessToken) return null;
+        const res = await fetch(
+          `${ID_SERVICE_BASE_URL}${KYB_COMPANY_PATH}/${businessId}`,
+          { method: 'GET', headers: { 'x-kyc-access-token': accessToken, 'Accept': 'application/json' } }
+        );
+        if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
+        const json = await res.json();
+        if (json?.error) {
+          const details = json.error?.details?.join?.(' ') || json.error?.join?.(' ') || json.error;
+          throw new Error(details || 'Unknown error');
+        }
+        return json.data || json;
       },
 
       async createKycSession(accessToken, tenantUrl) {
@@ -565,6 +591,7 @@
         const verifierData      = getVerifierData(window.location.href);
         const verifierId        = ref(verifierData?.serviceId || null);
         const urlPageType       = verifierData?.pageType || null;
+        const urlBusinessId     = verifierData?.businessId || null;
         const serviceName       = ref('Hypersign KYC');
         const pageTitle         = ref('Verify Your Identity');
         const pageSubtitle      = ref('Please read the Terms & Conditions before proceeding');
@@ -579,7 +606,7 @@
         const configError       = ref('');
         const cidDetailsExpanded = ref(false);
         const cfgDetailsExpanded = ref(false);
-        const isLoading         = ref(false);
+        const isLoading = ref(!!verifierData?.serviceId);
         const isVerified        = ref(false);
         const errorMessage      = ref('');
 
@@ -615,7 +642,11 @@
           }
         }
 
-        function applyConfigToState(configData, tokenData) {
+        function getBusinessName(businessData) {
+          return businessData?.name || '';
+        }
+
+        function applyConfigToState(configData, tokenData, businessName) {
           if (configData.logoUrl)       { logoUrl.value = configData.logoUrl; logoError.value = false; }
           if (configData.serviceName)     serviceName.value  = configData.serviceName;
           if (configData.pageTitle)       pageTitle.value    = configData.pageTitle;
@@ -630,6 +661,7 @@
             const key = FLOW_CONFIG[type].tokenKey;
             if (tokenData[key]) accessTokens[type] = tokenData[key];
           });
+            if (businessName) serviceName.value = businessName;
         }
 
         // ── Orchestration ─────────────────────────────────────────────────────
@@ -638,11 +670,24 @@
           try {
             const id = verifierId.value;
             if (!id) return false;
-            const configData = await ApiService.loadVerifierConfig(id, urlPageType);
-            const { serviceId: appId, _id: verifierConfigId } = configData;
-            if (!appId) throw new Error('appId not found in config response');
-            const tokenData = await ApiService.fetchTokens(verifierConfigId, appId);
-            applyConfigToState(configData, tokenData);
+            const configPromise = ApiService.loadVerifierConfig(id,  urlPageType);
+            const tokenPromise = configPromise.then((configData) => {
+              const { serviceId: appIdFromConfig, _id: verifierConfigId } = configData;
+              const appId = urlBusinessId ? id : appIdFromConfig;
+              if (!appId) throw new Error('appId not found in config response');
+              if (!verifierConfigId) throw new Error('verifierConfigId not found in config response');
+              return ApiService.fetchTokens(verifierConfigId, appId, urlBusinessId);
+            });
+            const businessPromise = urlBusinessId
+              ? tokenPromise.then((tokenData) => ApiService.fetchBusinessCompany(urlBusinessId, tokenData.kybAccessToken || tokenData.kycAccessToken))
+              : Promise.resolve(null);
+            const [configData, tokenData, businessData] = await Promise.all([
+              configPromise,
+              tokenPromise,
+              businessPromise,
+            ]);
+            const businessName = getBusinessName(businessData);
+            applyConfigToState(configData, tokenData, businessName);
             setSandboxBanner(configData.developmentStage);
             return true;
           } catch (err) {
