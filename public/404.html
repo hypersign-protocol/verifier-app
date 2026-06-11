@@ -373,6 +373,7 @@
 
     const KYC_SESSION_PATH = '/api/v1/e-kyc/verification/session';
     const KYB_COMPANY_PATH = '/api/v1/e-kyb/verification/company';
+    const BUSINESS_LOGO_BASE64 = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMjggMTI4Ij4KPHJlY3Qgd2lkdGg9IjEyOCIgaGVpZ2h0PSIxMjgiIGZpbGw9IiNFNUU3RUIiLz4KPHBhdGggZD0iTTMwIDk1VjM1bDMwLTZ2NjZ6IiBmaWxsPSIjMDAwIi8+CjxyZWN0IHg9IjM4IiB5PSI0MiIgd2lkdGg9IjYiIGhlaWdodD0iOCIgZmlsbD0iI2ZmZiIvPgo8cmVjdCB4PSI1MCIgeT0iNDIiIHdpZHRoPSI2IiBoZWlnaHQ9IjgiIGZpbGw9IiNmZmYiLz4KPHJlY3QgeD0iNjIiIHk9IjQyIiB3aWR0aD0iNiIgaGVpZ2h0PSI4IiBmaWxsPSIjZmZmIi8+CjxyZWN0IHg9IjM4IiB5PSI1NiIgd2lkdGg9IjYiIGhlaWdodD0iOCIgZmlsbD0iI2ZmZiIvPgo8cmVjdCB4PSI1MCIgeT0iNTYiIHdpZHRoPSI2IiBoZWlnaHQ9IjgiIGZpbGw9IiNmZmYiLz4KPHJlY3QgeD0iNjIiIHk9IjU2IiB3aWR0aD0iNiIgaGVpZ2h0PSI4IiBmaWxsPSIjZmZmIi8+CjxyZWN0IHg9IjM4IiB5PSI3MCIgd2lkdGg9IjYiIGhlaWdodD0iOCIgZmlsbD0iI2ZmZiIvPgo8cmVjdCB4PSI1MCIgeT0iNzAiIHdpZHRoPSI2IiBoZWlnaHQ9IjgiIGZpbGw9IiNmZmYiLz4KPHJlY3QgeD0iNjIiIHk9IjcwIiB3aWR0aD0iNiIgaGVpZ2h0PSI4IiBmaWxsPSIjZmZmIi8+CjxyZWN0IHg9IjQ2IiB5PSI4MiIgd2lkdGg9IjEwIiBoZWlnaHQ9IjEzIiBmaWxsPSIjZmZmIi8+CjxwYXRoIGQ9Ik03MCA5NVY1MGwyNSA2djM5eiIgZmlsbD0iIzAwMCIvPgo8cmVjdCB4PSI3OCIgeT0iNjIiIHdpZHRoPSI2IiBoZWlnaHQ9IjgiIGZpbGw9IiNmZmYiLz4KPHJlY3QgeD0iODgiIHk9IjYyIiB3aWR0aD0iNiIgaGVpZ2h0PSI4IiBmaWxsPSIjZmZmIi8+CjxyZWN0IHg9Ijc4IiB5PSI3NiIgd2lkdGg9IjYiIGhlaWdodD0iOCIgZmlsbD0iI2ZmZiIvPgo8cmVjdCB4PSI4OCIgeT0iNzYiIHdpZHRoPSI2IiBoZWlnaHQ9IjgiIGZpbGw9IiNmZmYiLz4KPHJlY3QgeD0iMjUiIHk9Ijk1IiB3aWR0aD0iNzUiIGhlaWdodD0iNSIgZmlsbD0iIzAwMCIvPgo8L3N2Zz4='
 
     const FLOW_CONFIG = {
       kyc: {
@@ -647,7 +648,13 @@
         }
 
         function applyConfigToState(configData, tokenData, businessName) {
-          if (configData.logoUrl)       { logoUrl.value = configData.logoUrl; logoError.value = false; }
+           if (urlBusinessId) {
+            logoUrl.value = BUSINESS_LOGO_BASE64;
+            logoError.value = false;
+          } else if (configData.logoUrl) {
+            logoUrl.value = configData.logoUrl;
+            logoError.value = false;
+          }
           if (configData.serviceName)     serviceName.value  = configData.serviceName;
           if (configData.pageTitle)       pageTitle.value    = configData.pageTitle;
           if (configData.pageDescription) pageSubtitle.value = configData.pageDescription;
