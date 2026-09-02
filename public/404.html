@@ -388,8 +388,11 @@
         ],
         async buildUrl(accessToken, ssiAccessToken, tenantUrl, widgetConfigId) {
           const base = `${this.widgetBaseUrl}?kycAccessToken=${accessToken}&ssiAccessToken=${ssiAccessToken}`;
+          const widgetUrl = widgetConfigId
+            ? `${base}&widgetConfigId=${encodeURIComponent(widgetConfigId)}`
+            : base;
           const { sessionId } = await ApiService.createKycSession(accessToken, tenantUrl, widgetConfigId);
-          return sessionId ? `${base}&sessionId=${sessionId}` : base;
+          return sessionId ? `${widgetUrl}&sessionId=${sessionId}` : widgetUrl;
         },
       },
       kyb: {
