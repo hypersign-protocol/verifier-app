@@ -386,10 +386,13 @@
           { icon: 'bi bi-credit-card', title: 'Verify ID Document', subtitle: 'Upload your ID for verification.' },
           { icon: 'bi bi-file-text',   title: 'Provide Consent',    subtitle: 'Agree to securely share your information.' },
         ],
-        async buildUrl(accessToken, ssiAccessToken, tenantUrl) {
+        async buildUrl(accessToken, ssiAccessToken, tenantUrl, widgetConfigId) {
           const base = `${this.widgetBaseUrl}?kycAccessToken=${accessToken}&ssiAccessToken=${ssiAccessToken}`;
-          const { sessionId } = await ApiService.createKycSession(accessToken, tenantUrl);
-          return sessionId ? `${base}&sessionId=${sessionId}` : base;
+          const widgetUrl = widgetConfigId
+            ? `${base}&configId=${encodeURIComponent(widgetConfigId)}`
+            : base;
+          const { sessionId } = await ApiService.createKycSession(accessToken, tenantUrl, widgetConfigId);
+          return sessionId ? `${widgetUrl}&sessionId=${sessionId}` : widgetUrl;
         },
       },
       kyb: {
@@ -522,11 +525,13 @@
         return json.data || json;
       },
 
-      async createKycSession(accessToken, tenantUrl) {
+      async createKycSession(accessToken, tenantUrl, widgetConfigId) {
         // const res = await fetch(`https://api.cavach.hypersign.id${KYC_SESSION_PATH}`, {
+        // const res=await fetch('http://localhost:3001'+`${KYC_SESSION_PATH}`,{
         const res = await fetch(`${tenantUrl}${KYC_SESSION_PATH}`, {
           method: 'POST',
           headers: { 'x-kyc-access-token': accessToken, 'content-type': 'application/json' },
+          body: JSON.stringify(widgetConfigId ? { widgetConfigId } : {}),
         });
         const json = await res.json();
         if (json?.error) throw new Error(json.error.details?.join(' '));
@@ -585,6 +590,7 @@
         // ── Credentials (non-reactive — only used in API calls) ──────────────
         let ssiAccessToken = '';
         let tenantUrl = '';
+        let widgetConfigId = '';
         const accessTokens = {};   // { kyc: '...', kyb: '...' }
 
         // ── Reactive State ───────────────────────────────────────────────────
@@ -664,6 +670,7 @@
                                           themeColor.value   = configData.themeColor;
           if (tokenData.ssiAccessToken)   ssiAccessToken     = tokenData.ssiAccessToken;
           if (configData.tenantUrl)           tenantUrl          = configData.tenantUrl;
+          widgetConfigId = configData.linkedWidgetConfigIds?.[0] || '';
           Object.keys(FLOW_CONFIG).forEach(type => {
             const key = FLOW_CONFIG[type].tokenKey;
             if (tokenData[key]) accessTokens[type] = tokenData[key];
@@ -709,7 +716,7 @@
 
         async function buildWidgetUrl() {
           const accessToken = accessTokens[pageType.value] || '';
-          return flowConfig.value.buildUrl(accessToken, ssiAccessToken, tenantUrl);
+          return flowConfig.value.buildUrl(accessToken, ssiAccessToken, tenantUrl, widgetConfigId);
         }
 
         // ── Actions ───────────────────────────────────────────────────────────
