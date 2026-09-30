@@ -653,6 +653,12 @@
           return businessData?.name || '';
         }
 
+        function createLogoFromServiceName(name) {
+          const initial = String(name || '').trim().charAt(0).toUpperCase() || '?';
+          const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128"><rect width="128" height="128" rx="64" fill="#e5e7eb"/><text x="64" y="66" dominant-baseline="central" text-anchor="middle" font-family="Arial,sans-serif" font-size="64" font-weight="600" fill="#374151">${initial}</text></svg>`;
+          return `data:image/svg+xml,${encodeURIComponent(svg)}`;
+        }
+
         function applyConfigToState(configData, tokenData, businessName) {
            if (urlBusinessId) {
             logoUrl.value = BUSINESS_LOGO_BASE64;
@@ -676,6 +682,10 @@
             if (tokenData[key]) accessTokens[type] = tokenData[key];
           });
             if (businessName) serviceName.value = businessName;
+          if (!urlBusinessId && !configData.logoUrl) {
+            logoUrl.value = createLogoFromServiceName(serviceName.value);
+            logoError.value = false;
+          }
         }
 
         // ── Orchestration ─────────────────────────────────────────────────────
