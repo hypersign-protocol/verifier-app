@@ -519,6 +519,7 @@
           { icon: 'bi bi-file-text',   title: 'Provide Consent',    subtitle: 'Agree to securely share your information.' },
         ],
         async buildUrl(accessToken, ssiAccessToken, tenantUrl, widgetConfigId) {
+          let shouldOpenInPopup = false;
           const { sessionId } = await ApiService.createKycSession(accessToken, tenantUrl, widgetConfigId);
           const widgetUrl = new URL(this.widgetBaseUrl);
           widgetUrl.searchParams.set('kycAccessToken', accessToken);
@@ -532,6 +533,7 @@
               tenantUrl,
               widgetConfigId
             );
+            shouldOpenInPopup = requiresPopupWindow(widgetConfig);
 
             if (requiresUserAccessToken(widgetConfig)) {
               const kycUserAccessToken = await ApiService.createKycUserAccessToken({
@@ -545,7 +547,10 @@
             }
           }
 
-          return widgetUrl.toString();
+          return {
+            url: widgetUrl.toString(),
+            shouldOpenInPopup,
+          };
         },
       },
       kyb: {
@@ -642,6 +647,11 @@
       return widgetConfig?.isEmailNotificationEnabled === false
         && widgetConfig?.isVaultEnabled === false
         && widgetConfig?.isWidgetLogin === false;
+    }
+
+    function requiresPopupWindow(widgetConfig) {
+      return widgetConfig?.isVaultEnabled === true
+        || widgetConfig?.isWidgetLogin === true;
     }
 
     function createRandomId() {
@@ -800,7 +810,43 @@
     };
 
     // ══════════════════════════════════════════════════════════════════════════
-    // 4. VUE APPLICATION
+    // 4. POPUP WINDOW SERVICE
+    //    Matches the window.open behavior used before the desktop slider was added.
+    // ══════════════════════════════════════════════════════════════════════════
+    const PopupWindowService = {
+      popup: null,
+      checker: null,
+
+      open(url, onClose) {
+        const width = 460;
+        const height = 900;
+        const left = (window.screen.width - width) / 2;
+        const top = (window.screen.height - height) / 2;
+        this.popup = window.open(
+          url,
+          '_blank',
+          `width=${width},height=${height},left=${left},top=${top},resizable,scrollbars`
+        );
+        if (!this.popup) throw new Error('Please allow popups to start verification.');
+        this.checker = window.setInterval(() => {
+          if (!this.popup?.closed) return;
+          this.clear();
+          onClose();
+        }, 500);
+      },
+
+      isSource(source) {
+        return !!this.popup && source === this.popup;
+      },
+
+      clear() {
+        if (this.checker !== null) window.clearInterval(this.checker);
+        this.checker = null;
+      },
+    };
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // 5. VUE APPLICATION
     //    Reactive state, computed props, orchestration, and event wiring.
     // ══════════════════════════════════════════════════════════════════════════
     const { createApp, ref, computed, watch, onMounted, onBeforeUnmount } = Vue;
@@ -951,7 +997,15 @@
 
         async function buildWidgetUrl() {
           const accessToken = accessTokens[pageType.value] || '';
-          return flowConfig.value.buildUrl(accessToken, ssiAccessToken, tenantUrl, widgetConfigId);
+          const result = await flowConfig.value.buildUrl(
+            accessToken,
+            ssiAccessToken,
+            tenantUrl,
+            widgetConfigId
+          );
+          return typeof result === 'string'
+            ? { url: result, shouldOpenInPopup: false }
+            : result;
         }
 
         // ── Actions ───────────────────────────────────────────────────────────
@@ -973,21 +1027,22 @@
           if (widgetFrameUrl.value) widgetPreparing.value = false;
         }
 
+        function isMobileDevice() {
+          return window.matchMedia
+            ? window.matchMedia('(max-width: 768px)').matches
+            : window.innerWidth <= 768;
+        }
+
         async function handleStartClick() {
           const launchId = ++widgetLaunchId;
-          const opensInSidebar = flowConfig.value.openInSidebar;
+          const isEmbeddedFlow = flowConfig.value.openInSidebar;
+          const opensInMobilePopup = isEmbeddedFlow && isMobileDevice();
 
           isLoading.value = true;
           errorMessage.value = '';
 
-          if (opensInSidebar) {
-            widgetFrameUrl.value = '';
-            widgetPreparing.value = true;
-            widgetSidebarOpen.value = true;
-          }
-
           try {
-            const url = await buildWidgetUrl();
+            const { url, shouldOpenInPopup } = await buildWidgetUrl();
             if (launchId !== widgetLaunchId) return;
             if (!url) {
               resetWidgetSidebar();
@@ -995,8 +1050,16 @@
               return;
             }
 
-            if (opensInSidebar) {
+            if (opensInMobilePopup || (isEmbeddedFlow && shouldOpenInPopup)) {
+              PopupWindowService.open(url, () => {
+                if (launchId !== widgetLaunchId) return;
+                errorMessage.value = 'Seems like you rejected the verification request!';
+                isLoading.value = false;
+              });
+            } else if (isEmbeddedFlow) {
+              widgetPreparing.value = true;
               widgetFrameUrl.value = url;
+              widgetSidebarOpen.value = true;
             } else {
               window.location.href = url;
             }
@@ -1016,8 +1079,10 @@
 
         function handleWidgetMessage(event) {
           try {
-            if (!widgetSidebarOpen.value) return;
-            if (event.source !== widgetFrameElement.value?.contentWindow) return;
+            const comesFromSidebar = widgetSidebarOpen.value
+              && event.source === widgetFrameElement.value?.contentWindow;
+            const comesFromPopup = PopupWindowService.isSource(event.source);
+            if (!comesFromSidebar && !comesFromPopup) return;
             if (!ALLOWED_ORIGINS.has(new URL(event.origin).origin)) return;
 
             const data = typeof event.data === 'string'
@@ -1025,11 +1090,13 @@
               : event.data;
 
             if (data?.status === 'success') {
+              PopupWindowService.clear();
               resetWidgetSidebar();
               isVerified.value   = true;
               isLoading.value    = false;
               errorMessage.value = '';
             } else if (data?.status === 'error') {
+              PopupWindowService.clear();
               resetWidgetSidebar();
               errorMessage.value = data.message || 'Failed to verify the user, please try again!';
               isLoading.value    = false;
@@ -1051,6 +1118,7 @@
         onBeforeUnmount(() => {
           window.removeEventListener('message', handleWidgetMessage);
           window.removeEventListener('keydown', handleEscape);
+          PopupWindowService.clear();
         });
 
         // ── Template bindings ─────────────────────────────────────────────────
