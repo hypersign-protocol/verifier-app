@@ -39,29 +39,23 @@ async function build() {
   await rmDir(outDir);
   await fs.promises.mkdir(outDir, { recursive: true });
 
-  // process index.html with injected envs
+  // Process both entry documents so direct and SPA-fallback routes share config.
   const indexPath = path.join(publicDir, 'index.html');
-  const indexOut = path.join(outDir, 'index.html');
   if (fs.existsSync(indexPath)) {
     const html = await fs.promises.readFile(indexPath, 'utf8');
     const processed = injectEnvVariables(html);
-    await fs.promises.writeFile(indexOut, processed, 'utf8');
+    await Promise.all([
+      fs.promises.writeFile(path.join(outDir, 'index.html'), processed, 'utf8'),
+      fs.promises.writeFile(path.join(outDir, '404.html'), processed, 'utf8'),
+    ]);
   }
 
-  // copy everything else from public except index.html
+  // Copy static assets and data; entry documents were generated above.
   const entries = await fs.promises.readdir(publicDir);
   await Promise.all(entries.map(async (entry) => {
-    const src = path.join(publicDir, entry);
-    const dest = path.join(outDir, entry);
-    if (entry === 'index.html') return;
-    await copyRecursive(src, dest);
+    if (entry === 'index.html' || entry === '404.html') return;
+    await copyRecursive(path.join(publicDir, entry), path.join(outDir, entry));
   }));
-
-  // ensure 404.html exists (SPA fallback)
-  const fallback404 = path.join(outDir, '404.html');
-  if (!fs.existsSync(fallback404) && fs.existsSync(path.join(outDir, 'index.html'))) {
-    await fs.promises.copyFile(path.join(outDir, 'index.html'), fallback404);
-  }
 
   console.log('Build complete. Serve the `dist` folder as static site.');
 }
