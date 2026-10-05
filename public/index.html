@@ -193,6 +193,101 @@
       border-top-color: #fff;
     }
 
+    /* Embedded verification drawer */
+    .widget-backdrop {
+      background: rgba(15, 23, 42, 0.45);
+      inset: 0;
+      opacity: 0;
+      pointer-events: none;
+      position: fixed;
+      transition: opacity 0.3s ease;
+      z-index: 1990;
+    }
+
+    .widget-backdrop.is-open {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .widget-panel {
+      background: var(--theme-surface);
+      border-left: 1px solid var(--theme-border);
+      bottom: 0;
+      box-shadow: -16px 0 40px rgba(0, 0, 0, 0.18);
+      display: flex;
+      flex-direction: column;
+      position: fixed;
+      right: 0;
+      top: 0;
+      transform: translateX(100%);
+      transition: transform 0.32s cubic-bezier(0.22, 0.9, 0.32, 1), visibility 0s linear 0.32s;
+      visibility: hidden;
+      width: clamp(360px, 32vw, 460px);
+      z-index: 2000;
+    }
+
+    .widget-panel.is-open {
+      transform: translateX(0);
+      transition-delay: 0s;
+      visibility: visible;
+    }
+
+    .widget-panel-header {
+      align-items: center;
+      border-bottom: 1px solid var(--theme-border);
+      display: flex;
+      flex: 0 0 auto;
+      justify-content: space-between;
+      padding: 16px 18px;
+    }
+
+    .widget-panel-close {
+      align-items: center;
+      border-radius: 0.5rem;
+      color: var(--theme-text-secondary);
+      display: inline-flex;
+      height: 2rem;
+      justify-content: center;
+      transition: background-color 0.2s ease, color 0.2s ease;
+      width: 2rem;
+    }
+
+    .widget-panel-close:hover {
+      background: var(--theme-background);
+      color: var(--theme-text);
+    }
+
+    .widget-frame-wrap {
+      background: var(--theme-background);
+      flex: 1 1 auto;
+      min-height: 0;
+      position: relative;
+    }
+
+    .widget-frame-loading {
+      align-items: center;
+      background: var(--theme-surface);
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      inset: 0;
+      justify-content: center;
+      position: absolute;
+      z-index: 1;
+    }
+
+    .widget-frame {
+      border: 0;
+      height: 100%;
+      opacity: 1;
+      transition: opacity 0.2s ease;
+      width: 100%;
+    }
+
+    .widget-frame.is-loading {
+      opacity: 0;
+    }
+
     /* Powered-by logo: adapt for dark theme visibility */
     [data-theme="dark"] #poweredByLogo {
       filter: invert(1) brightness(1.6) contrast(1.1);
@@ -208,6 +303,11 @@
       .theme-option {
         width: 40px;
         height: 40px;
+      }
+
+      .widget-panel {
+        border-left: 0;
+        width: 100%;
       }
     }
   </style>
@@ -347,6 +447,35 @@
 
     </section>
 
+    <div class="widget-backdrop" :class="{ 'is-open': widgetSidebarOpen }"
+      :aria-hidden="String(!widgetSidebarOpen)" @click="cancelWidgetSidebar"></div>
+
+    <aside class="widget-panel" :class="{ 'is-open': widgetSidebarOpen }"
+      :aria-hidden="String(!widgetSidebarOpen)" aria-label="Identity verification" role="dialog">
+      <header class="widget-panel-header">
+        <div>
+          <h2 class="theme-title text-base font-semibold m-0">Hypersign ID</h2>
+          <p class="theme-subtitle text-sm m-0">KYC verification</p>
+        </div>
+        <button type="button" class="widget-panel-close" aria-label="Close verification"
+          @click="cancelWidgetSidebar">
+          <i class="bi bi-x text-xl"></i>
+        </button>
+      </header>
+      <div class="widget-frame-wrap">
+        <div v-if="widgetPreparing" class="widget-frame-loading" role="status" aria-live="polite">
+          <span class="spinner"></span>
+          <p class="theme-subtitle text-sm m-0">
+            {{ widgetFrameUrl ? 'Loading verification…' : 'Preparing verification…' }}
+          </p>
+        </div>
+        <iframe v-if="widgetFrameUrl" ref="widgetFrameElement" class="widget-frame"
+          :class="{ 'is-loading': widgetPreparing }" :src="widgetFrameUrl"
+          title="Hypersign ID verification" @load="handleWidgetFrameLoad"
+          allow="camera; microphone; fullscreen; clipboard-read; clipboard-write"></iframe>
+      </div>
+    </aside>
+
     <!-- Footer -->
     <footer class="theme-subtitle mt-8 text-center space-y-2">
       <div>
@@ -383,13 +512,14 @@
         widgetBaseUrl: window.KYC_WIDGET_URL || 'https://verify.hypersign.id/',
         tokenKey:      'kycAccessToken',
         buttonIcon:    'bi bi-shield',
-        openInPopup:   true,
+        openInSidebar: true,
         steps: [
           { icon: 'bi bi-camera',      title: 'Take Selfie',        subtitle: 'Capture a clear photo of yourself.' },
           { icon: 'bi bi-credit-card', title: 'Verify ID Document', subtitle: 'Upload your ID for verification.' },
           { icon: 'bi bi-file-text',   title: 'Provide Consent',    subtitle: 'Agree to securely share your information.' },
         ],
         async buildUrl(accessToken, ssiAccessToken, tenantUrl, widgetConfigId) {
+          let shouldOpenInPopup = false;
           const { sessionId } = await ApiService.createKycSession(accessToken, tenantUrl, widgetConfigId);
           const widgetUrl = new URL(this.widgetBaseUrl);
           widgetUrl.searchParams.set('kycAccessToken', accessToken);
@@ -403,6 +533,7 @@
               tenantUrl,
               widgetConfigId
             );
+            shouldOpenInPopup = requiresPopupWindow(widgetConfig);
 
             if (requiresUserAccessToken(widgetConfig)) {
               const kycUserAccessToken = await ApiService.createKycUserAccessToken({
@@ -416,14 +547,17 @@
             }
           }
 
-          return widgetUrl.toString();
+          return {
+            url: widgetUrl.toString(),
+            shouldOpenInPopup,
+          };
         },
       },
       kyb: {
         widgetBaseUrl: window.KYB_WIDGET_URL || 'https://verify.business.hypersign.id/',
         tokenKey:      'kybAccessToken',
         buttonIcon:    'bi bi-briefcase',
-        openInPopup:   false,
+        openInSidebar: false,
         steps: [
           { icon: 'bi bi-building',     title: 'Company Details',  subtitle: 'Legal name, Reg number, and Tax ID.' },
           { icon: 'bi bi-cloud-upload', title: 'Upload Documents', subtitle: 'Certificate of Inc. & MoA/AoA.' },
@@ -513,6 +647,11 @@
       return widgetConfig?.isEmailNotificationEnabled === false
         && widgetConfig?.isVaultEnabled === false
         && widgetConfig?.isWidgetLogin === false;
+    }
+
+    function requiresPopupWindow(widgetConfig) {
+      return widgetConfig?.isVaultEnabled === true
+        || widgetConfig?.isWidgetLogin === true;
     }
 
     function createRandomId() {
@@ -671,50 +810,46 @@
     };
 
     // ══════════════════════════════════════════════════════════════════════════
-    // 4. WINDOW SERVICE
-    //    Popup / tab lifecycle management. Accepts callbacks; no Vue imports.
+    // 4. POPUP WINDOW SERVICE
+    //    Matches the window.open behavior used before the desktop slider was added.
     // ══════════════════════════════════════════════════════════════════════════
-    const WindowService = {
-      _popup:   null,
-      _checker: null,
+    const PopupWindowService = {
+      popup: null,
+      checker: null,
 
-      _startPolling(onClose) {
-        this._checker = setInterval(() => {
-          if (this._popup?.closed) {
-            this.clearChecker();
-            onClose();
-          }
+      open(url, onClose) {
+        const width = 460;
+        const height = 900;
+        const left = (window.screen.width - width) / 2;
+        const top = (window.screen.height - height) / 2;
+        this.popup = window.open(
+          url,
+          '_blank',
+          `width=${width},height=${height},left=${left},top=${top},resizable,scrollbars`
+        );
+        if (!this.popup) throw new Error('Please allow popups to start verification.');
+        this.checker = window.setInterval(() => {
+          if (!this.popup?.closed) return;
+          this.clear();
+          onClose();
         }, 500);
       },
 
-      clearChecker() {
-        clearInterval(this._checker);
-        this._checker = null;
+      isSource(source) {
+        return !!this.popup && source === this.popup;
       },
 
-      /** Opens a fixed-size mobile-style popup (KYC). */
-      openMobile(url, onClose) {
-        const w = 460, h = 900;
-        const left = (window.screen.width  - w) / 2;
-        const top  = (window.screen.height - h) / 2;
-        this._popup = window.open(url, '_blank',
-          `width=${w},height=${h},left=${left},top=${top},resizable,scrollbars`);
-        this._startPolling(onClose);
-      },
-
-      /** Opens a new tab/window at the browser's default size (KYB). */
-      openDesktop(url, onClose) {
-        this._popup = window.open(url, '_blank');
-        this._startPolling(onClose);
+      clear() {
+        if (this.checker !== null) window.clearInterval(this.checker);
+        this.checker = null;
       },
     };
 
     // ══════════════════════════════════════════════════════════════════════════
     // 5. VUE APPLICATION
     //    Reactive state, computed props, orchestration, and event wiring.
-    //    Calls into ApiService and WindowService; owns no raw fetch/DOM logic.
     // ══════════════════════════════════════════════════════════════════════════
-    const { createApp, ref, computed, watch, onMounted } = Vue;
+    const { createApp, ref, computed, watch, onMounted, onBeforeUnmount } = Vue;
 
     createApp({
       setup() {
@@ -722,6 +857,7 @@
         let ssiAccessToken = '';
         let tenantUrl = '';
         let widgetConfigId = '';
+        let widgetLaunchId = 0;
         const accessTokens = {};   // { kyc: '...', kyb: '...' }
 
         // ── Reactive State ───────────────────────────────────────────────────
@@ -747,6 +883,10 @@
         const isLoading = ref(!!verifierData?.serviceId);
         const isVerified        = ref(false);
         const errorMessage      = ref('');
+        const widgetSidebarOpen = ref(false);
+        const widgetPreparing   = ref(false);
+        const widgetFrameUrl    = ref('');
+        const widgetFrameElement = ref(null);
 
         // ── Computed ─────────────────────────────────────────────────────────
         const flowConfig = computed(() => FLOW_CONFIG[pageType.value] ?? FLOW_CONFIG.kyc);
@@ -857,56 +997,128 @@
 
         async function buildWidgetUrl() {
           const accessToken = accessTokens[pageType.value] || '';
-          return flowConfig.value.buildUrl(accessToken, ssiAccessToken, tenantUrl, widgetConfigId);
+          const result = await flowConfig.value.buildUrl(
+            accessToken,
+            ssiAccessToken,
+            tenantUrl,
+            widgetConfigId
+          );
+          return typeof result === 'string'
+            ? { url: result, shouldOpenInPopup: false }
+            : result;
         }
 
         // ── Actions ───────────────────────────────────────────────────────────
+        function resetWidgetSidebar() {
+          widgetSidebarOpen.value = false;
+          widgetPreparing.value = false;
+          widgetFrameUrl.value = '';
+        }
+
+        function cancelWidgetSidebar() {
+          if (!widgetSidebarOpen.value) return;
+          widgetLaunchId += 1;
+          resetWidgetSidebar();
+          errorMessage.value = 'Seems like you rejected the verification request!';
+          isLoading.value = false;
+        }
+
+        function handleWidgetFrameLoad() {
+          if (widgetFrameUrl.value) widgetPreparing.value = false;
+        }
+
+        function isMobileDevice() {
+          return window.matchMedia
+            ? window.matchMedia('(max-width: 768px)').matches
+            : window.innerWidth <= 768;
+        }
+
         async function handleStartClick() {
+          const launchId = ++widgetLaunchId;
+          const isEmbeddedFlow = flowConfig.value.openInSidebar;
+          const opensInMobilePopup = isEmbeddedFlow && isMobileDevice();
+
+          isLoading.value = true;
+          errorMessage.value = '';
+
           try {
-            isLoading.value    = true;
-            errorMessage.value = '';
-            const url = await buildWidgetUrl();
-            if (!url) return;
-            const onClose = () => {
-              errorMessage.value = 'Seems like you rejected the verification request!';
-              isLoading.value    = false;
-            };
-            if (flowConfig.value.openInPopup) {
-              WindowService.openMobile(url, onClose);
+            const { url, shouldOpenInPopup } = await buildWidgetUrl();
+            if (launchId !== widgetLaunchId) return;
+            if (!url) {
+              resetWidgetSidebar();
+              isLoading.value = false;
+              return;
+            }
+
+            if (opensInMobilePopup || (isEmbeddedFlow && shouldOpenInPopup)) {
+              PopupWindowService.open(url, () => {
+                if (launchId !== widgetLaunchId) return;
+                errorMessage.value = 'Seems like you rejected the verification request!';
+                isLoading.value = false;
+              });
+            } else if (isEmbeddedFlow) {
+              widgetPreparing.value = true;
+              widgetFrameUrl.value = url;
+              widgetSidebarOpen.value = true;
             } else {
-              window.location.href = url;               
+              window.location.href = url;
             }
           } catch (e) {
+            if (launchId !== widgetLaunchId) return;
             console.error(e);
+            resetWidgetSidebar();
             errorMessage.value = e.message || 'Failed to start verification, please try again.';
-            isLoading.value    = false;
+            isLoading.value = false;
           }
         }
 
-        // ── Lifecycle ─────────────────────────────────────────────────────────
-        onMounted(async () => {
-          if (!verifierId.value) return;
-          configLoaded.value = await loadConfig();
-        });
-
-        // ── postMessage handler (widget → this page) ──────────────────────────
+        // ── Widget events and lifecycle ───────────────────────────────────────
         const ALLOWED_ORIGINS = new Set(
-          Object.values(FLOW_CONFIG).map(c => new URL(c.widgetBaseUrl).origin)
+          Object.values(FLOW_CONFIG).map(config => new URL(config.widgetBaseUrl).origin)
         );
-        window.addEventListener('message', (event) => {
+
+        function handleWidgetMessage(event) {
           try {
+            const comesFromSidebar = widgetSidebarOpen.value
+              && event.source === widgetFrameElement.value?.contentWindow;
+            const comesFromPopup = PopupWindowService.isSource(event.source);
+            if (!comesFromSidebar && !comesFromPopup) return;
             if (!ALLOWED_ORIGINS.has(new URL(event.origin).origin)) return;
-            WindowService.clearChecker();
-            const data = JSON.parse(event.data);
-            if (data.status === 'success') {
+
+            const data = typeof event.data === 'string'
+              ? JSON.parse(event.data)
+              : event.data;
+
+            if (data?.status === 'success') {
+              PopupWindowService.clear();
+              resetWidgetSidebar();
               isVerified.value   = true;
               isLoading.value    = false;
               errorMessage.value = '';
-            } else if (data.status === 'error') {
+            } else if (data?.status === 'error') {
+              PopupWindowService.clear();
+              resetWidgetSidebar();
               errorMessage.value = data.message || 'Failed to verify the user, please try again!';
               isLoading.value    = false;
             }
           } catch (_) {}
+        }
+
+        function handleEscape(event) {
+          if (event.key === 'Escape') cancelWidgetSidebar();
+        }
+
+        onMounted(async () => {
+          window.addEventListener('message', handleWidgetMessage);
+          window.addEventListener('keydown', handleEscape);
+          if (!verifierId.value) return;
+          configLoaded.value = await loadConfig();
+        });
+
+        onBeforeUnmount(() => {
+          window.removeEventListener('message', handleWidgetMessage);
+          window.removeEventListener('keydown', handleEscape);
+          PopupWindowService.clear();
         });
 
         // ── Template bindings ─────────────────────────────────────────────────
@@ -917,8 +1129,9 @@
           configLoaded, configError,
           cidDetailsExpanded, cfgDetailsExpanded,
           isLoading, isVerified, errorMessage,
+          widgetSidebarOpen, widgetPreparing, widgetFrameUrl, widgetFrameElement,
           steps, flowConfig,
-          handleStartClick,
+          handleStartClick, cancelWidgetSidebar, handleWidgetFrameLoad,
           closeSandbox()    { sandboxVisible.value = false; },
           handleLogoError() { logoError.value = true; },
         };
